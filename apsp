@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Apple Spider v0.1
+
+set -euo pipefail
+
+# required configs
+EXPECTED_WEEKS="${WEEKS:-1-2}"
+EXPECTED_STORES="${STORES:-西湖|万象城}"
+
+# optional configs
+DEBUG=${DEBUG:-0}
+NOTIFICATION_TOOL="${NOTIFICATION_TOOL:-cat}"
+DEBUGGING_PAYLOAD="${PAYLOAD:-$HOME/Desktop/apsp.json}"
+API_ENDPOINT=https://www.apple.com.cn/shop/sba/availability-message
+
+# private vars
+declare -i retries=1 default_delays=1
+declare banner='Apple Spider v0.1' msg_file
+msg_file=$(mktemp)
+
+trap teardown EXIT
+teardown() {
+	[ -f "$msg_file" ] && rm -f -- "$msg_file"
+}
+
+raise_error() {
+	echo -e "apsp: $1" >&2
+	exit "${2:-1}"
+}
+
+test_json() {
+	jq -e "$1" &>/dev/null
+}
+
+status() {
+	echo -en "\033[2K\r$1..." >&2
+}
+
+check() {
+	local count=0 args=(-fsSL) resp item
+	for model in "$@"; do
+		args+=(--url-query "parts.$((count++))=$model")
+	done
+	args+=(--url "$API_ENDPOINT")
+
+	status "Querying $count device models ($((retries++)))"
+	if [ "$DEBUG" = 1 ]; then
+		resp=$(cat "$DEBUGGING_PAYLOAD") || return 100
+	else
+		resp=$(curl "${args[@]}") || return 100
+	fi
+	test_json '.head.status == "200"' <<<"$resp" || return 101
+
+	while read -r item; do
+		test_json '.availableAtAnyStore or (.deliveryMessage.deliveryOptionMessages[0].displayName | contains("'"$EXPECTED_WEEKS"'"))' <<<"$item" || continue
+
+		echo -en "*$banner*\n\n\`$(date '+%D %T')\` "
+		echo -n "*$(jq -r '"\(.deliveryMessage.subHeader) (\(.partNumber))"' <<<"$item")* "
+		if jq -r '.deliveryMessage.deliveryOptionMessages[0].displayName' | grep -Fq "$EXPECTED_WEEKS"; then
+			echo "delivery within $EXPECTED_WEEKS weeks!"
+			return 0
+		elif grep -Eq "$EXPECTED_STORES" <<<"$resp"; then
+			echo "found in Apple Store $(grep -Eo "$EXPECTED_STORES" <<<"$resp")!"
+			return 0
+		else
+			echo "$(jq .partAvailableStoresCount <<<"$item") items available at some stores you don't want."
+		fi
+	done < <(jq -c '.body.content[]' <<<"$resp")
+
+	return 1
+}
+
+main() {
+	echo "$banner" >&2
+	[ $# -eq 0 ] && raise_error "No device models provided.\nUsage: apsp <device_model_1> <device_model_2>...\nModel example: MTQ63CH/A"
+	command -v jq >/dev/null || raise_error "jq not found. Please install it."
+
+	local ret delays=$default_delays
+	while :; do
+		check "$@" >"$msg_file" && ret=0 || ret=$?
+		if [ $ret -eq 0 ]; then
+			status "Notifiying ${NOTIFICATION_TOOL% *}" >&2
+			# shellcheck disable=SC2015
+			"${NOTIFICATION_TOOL[@]}" <"$msg_file" || true
+			break
+		elif [ $ret -ge 100 ]; then
+			[ "$DEBUG" = 1 ] && {
+				echo -en "\n$(date) ERROR: $ret" >&2
+				break
+			}
+			delays=$((delays * 2))
+		else
+			delays=$default_delays
+		fi
+
+		[ $delays -gt $default_delays ] && status "Sleeping for ${delays}s"
+		sleep $delays
+	done
+}
+
+main "$@"
