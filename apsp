@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apple Spider v0.1
+# Apple Spider v0.2
 # Author: @janlay
 
 set -euo pipefail
@@ -16,7 +16,7 @@ API_ENDPOINT=https://www.apple.com.cn/shop/sba/availability-message
 
 # private vars
 declare -i retries=1 default_delays=1
-declare banner='Apple Spider v0.1' msg_file
+declare banner='Apple Spider v0.2' msg_file
 msg_file=$(mktemp)
 
 trap teardown EXIT
@@ -61,6 +61,8 @@ check() {
 			echo "delivery within $EXPECTED_WEEKS weeks!"
 			return 0
 		elif grep -Eq "$EXPECTED_STORES" <<<"$item"; then
+			# Finally, I have a chance to see the JSON schema
+			echo "$item" >"$HOME/.apsp-item.json"
 			echo "found in Apple Store $(grep -Eo "\\S*($EXPECTED_STORES)" <<<"$item" | head -n1)!"
 			return 0
 		else
