@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Apple Spider v0.1
+# Author: @janlay
 
 set -euo pipefail
 
@@ -59,8 +60,8 @@ check() {
 		if jq -r '.deliveryMessage.deliveryOptionMessages[0].displayName' | grep -Fq "$EXPECTED_WEEKS"; then
 			echo "delivery within $EXPECTED_WEEKS weeks!"
 			return 0
-		elif grep -Eq "$EXPECTED_STORES" <<<"$resp"; then
-			echo "found in Apple Store $(grep -Eo "$EXPECTED_STORES" <<<"$resp")!"
+		elif grep -Eq "$EXPECTED_STORES" <<<"$item"; then
+			echo "found in Apple Store $(grep -Eo "\\S*($EXPECTED_STORES)" <<<"$item" | head -n1)!"
 			return 0
 		else
 			echo "$(jq .partAvailableStoresCount <<<"$item") items available at some stores you don't want."
